@@ -1,0 +1,7 @@
+{
+  "name": "自动文件处理器",
+  "version": "1.5.12",
+  "author": "Noctfom",
+  "description": "自动接收、存储和管理用户发送的文件，支持私聊和群聊场景",
+  "main": "main.py"
+}

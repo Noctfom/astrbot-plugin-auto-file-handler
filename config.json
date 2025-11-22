@@ -1,0 +1,8 @@
+{
+  "name": "自动文件处理器",
+  "module": "astrbot_plugin_auto_file_handler",
+  "version": "1.0.0",
+  "author": "Noctfom",
+  "description": "自动文件处理器",
+  "main": "main.py"
+}

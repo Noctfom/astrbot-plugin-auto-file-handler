@@ -1,0 +1,69 @@
+{
+  "storage_path": {
+    "description": "文件存储的根目录路径",
+    "type": "string",
+    "default": "/app/storage/auto_file_handler",
+    "hint": "接收到的文件将保存到此目录下的用户子目录中"
+  },
+  "auto_cleanup_enabled": {
+    "description": "是否启用自动清理过期文件功能",
+    "type": "bool",
+    "default": true,
+    "hint": "是否自动清理过期文件"
+  },
+  "cleanup_days": {
+    "description": "自动清理多少天之前的文件",
+    "type": "int",
+    "default": 7,
+    "hint": "多少天后自动清理文件",
+    "obvious_hint": true
+  },
+  "send_completion_message": {
+    "description": "文件接收完成后是否发送提示消息",
+    "type": "bool",
+    "default": true,
+    "hint": "文件接收完成后是否发送提示消息"
+  },
+  "max_files_per_user": {
+    "description": "每个用户最大存储文件数量",
+    "type": "int",
+    "default": 5,
+    "hint": "每个用户目录下最多保存的文件数量"
+  },
+  "max_file_size_mb": {
+    "description": "单个文件大小限制(MB)",
+    "type": "int",
+    "default": 100,
+    "hint": "单个文件最大大小(MB)，0表示无限制"
+  },
+  "group_whitelist": {
+    "description": "允许接收文件的群号列表，用逗号分隔，留空表示允许所有群",
+    "type": "string",
+    "default": "",
+    "hint": "允许使用插件的群号列表，留空表示所有群都允许"
+  },
+  "auto_receive_group_files": {
+    "description": "是否自动接收群文件",
+    "type": "bool",
+    "default": true,
+    "hint": "开启时自动存储群文件，关闭时需使用/接收群文件指令"
+  },
+  "max_files_per_group": {
+    "description": "每个群最大存储文件数量",
+    "type": "int",
+    "default": 10,
+    "hint": "每个群目录下最多保存的文件数量"
+  },
+  "group_file_receive_timeout": {
+    "description": "手动接收群文件时的超时时间（秒）",
+    "type": "int",
+    "default": 60,
+    "hint": "使用/接收群文件指令后的等待时间"
+  },
+  "debug_mode": {
+    "description": "开启详细日志记录，用于问题排查",
+    "type": "bool",
+    "default": false,
+    "hint": "开启后将在日志中显示详细的文件操作过程"
+  }
+}
