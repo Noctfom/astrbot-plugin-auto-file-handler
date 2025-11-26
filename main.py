@@ -1,6 +1,7 @@
-# -*- coding: utf-8 -*-
+from astrbot.api.event import MessageChain
+# TODO: v1.6.2 improvements based on AI review\n# -*- coding: utf-8 -*-
 """
-AstrBot自动文件处理器插件 - 1.5.12版本
+AstrBot自动文件处理器插件 - 1.6.2版本
 彻底修复ToolExecResult调用错误和添加调试开关
 """
 
@@ -28,9 +29,9 @@ try:
     LLM_TOOL_SUPPORT = True
 except ImportError:
     LLM_TOOL_SUPPORT = False
-    logger.info("[FileHandler-1.5.12] LLM工具支持不可用")
+    logger.info("[FileHandler-1.6.2] LLM工具支持不可用")
 
-# 全局存储插件实例，供LLM工具访问
+# 全局存储插件实例,供LLM工具访问
 _plugin_instance = None
 
 # LLM工具定义 - 彻底修复ToolExecResult调用错误
@@ -38,7 +39,7 @@ if LLM_TOOL_SUPPORT:
     @dataclass
     class FileListTool(FunctionTool[AstrAgentContext]):
         name: str = "list_user_files"
-        description: str = "当用户询问关于他们发送给机器人的文件时，使用此工具列出用户的所有文件信息，包括文件名、路径、大小等"
+        description: str = "当用户表达想要查看自己发送给机器人文件的意图时,包括但不限于以下表述:'查看文件'、'我的文件'、'文件列表'、'能看到我发送的文件吗'、'检查文件'、'上传的文件'、'文件详情',立即主动调用此工具,为用户提供完整的文件信息列表,包含文件名、存储路径、文件大小、类型和上传时间等关键信息。"
         parameters: dict = Field(
             default_factory=lambda: {
                 "type": "object",
@@ -58,12 +59,12 @@ if LLM_TOOL_SUPPORT:
             user_id = kwargs.get("user_id", "")
             if not user_id:
                 # 修复ToolExecResult调用错误 - 使用正确的方式创建实例
-                return ToolExecResult(content="错误：缺少用户ID参数")
+                return "错误:缺少用户ID参数"
             
             # 获取插件实例以访问配置的存储路径
             global _plugin_instance
             if _plugin_instance is None:
-                return ToolExecResult(content="错误：插件实例未初始化")
+                return "错误:插件实例未初始化"
             
             # 确保使用最新的配置数据
             try:
@@ -75,16 +76,16 @@ if LLM_TOOL_SUPPORT:
             except Exception as e:
                 logger.error(f"[FileListTool] 获取存储路径时出错: {e}")
                 # 修复ToolExecResult调用错误
-                return ToolExecResult(content=f"获取存储路径时出错: {str(e)}")
+                return f"获取存储路径时出错: {str(e)}"
             
             user_storage_path = os.path.join(storage_path, f"user_{user_id}")
             
             if not os.path.exists(user_storage_path):
-                return ToolExecResult(content="该用户暂无文件")
+                return "该用户暂无文件"
             
             record_file = os.path.join(user_storage_path, '.file_records.json')
             if not os.path.exists(record_file):
-                return ToolExecResult(content="该用户暂无文件记录")
+                return "该用户暂无文件记录"
             
             try:
                 with open(record_file, 'r', encoding='utf-8') as f:
@@ -92,7 +93,7 @@ if LLM_TOOL_SUPPORT:
                     success_records = [r for r in records if r.get('download_status') == 'success']
                 
                 if not success_records:
-                    return ToolExecResult(content="该用户暂无文件")
+                    return "该用户暂无文件"
                 
                 # 格式化文件信息
                 file_info_list = []
@@ -134,15 +135,41 @@ if LLM_TOOL_SUPPORT:
                     result_str += f"   时间: {file_info['receive_time']}\n\n"
                 
                 # 修复ToolExecResult调用错误
-                return ToolExecResult(content=result_str.strip())
+                return result_str.strip()
                 
             except Exception as e:
                 logger.error(f"[FileListTool] 读取文件信息时出错: {e}")
                 # 修复ToolExecResult调用错误
-                return ToolExecResult(content=f"读取文件信息时出错: {str(e)}")
+                return f"读取文件信息时出错: {str(e)}"
 
-@register("auto_file_handler", "Noctfom", "自动文件处理器", "1.5.12", "")
+@register("auto_file_handler", "Noctfom", "自动文件处理器", "1.6.2", "")
 class PluginMain(Star):
+    def _find_target_record(self, records, file_identifier):
+        """通用文件记录查找方法"""
+        try:
+            # 尝试按序号查找
+            if file_identifier.isdigit():
+                index = int(file_identifier) - 1
+                if 0 <= index < len(records):
+                    return records[index], index
+
+            # 按文件名模糊查找
+            for i, record in enumerate(records):
+                if file_identifier in record.get('final_filename', ''):
+                    return record, i
+
+            # 按文件名精确查找
+            for i, record in enumerate(records):
+                final_name = record.get('final_filename', '').lower()
+                if final_name == file_identifier.lower():
+                    return record, i
+
+            return None, -1
+
+        except Exception as e:
+            logger.error(f"[1.6.2] 查找文件记录时出错: {e}")
+            return None, -1
+
     def __init__(self, context, config: AstrBotConfig = None):
         super().__init__(context)
         self.context = context
@@ -167,6 +194,8 @@ class PluginMain(Star):
             self.max_files_per_group = config.get('max_files_per_group', 10)
             self.group_file_receive_timeout = config.get('group_file_receive_timeout', 60)
             self.debug_mode = config.get('debug_mode', False)  # 新增调试模式
+            self.auto_read_content = config.get('auto_read_content', False)
+            self.max_auto_read_size = config.get('max_auto_read_size', 2000)  # 默认100KB
         else:
             self.storage_path = '/app/storage/auto_file_handler'
             self.auto_cleanup_enabled = True
@@ -179,6 +208,8 @@ class PluginMain(Star):
             self.max_files_per_group = 10
             self.group_file_receive_timeout = 60
             self.debug_mode = False  # 默认关闭调试模式
+            self.auto_read_content = True
+            self.max_auto_read_size = 2000  # 默认100KB
         
         os.makedirs(self.storage_path, exist_ok=True)
         
@@ -193,15 +224,15 @@ class PluginMain(Star):
             try:
                 self.context.add_llm_tools(FileListTool())
                 if self.debug_mode:
-                    logger.info("[FileHandler-1.5.12] LLM工具已注册")
-                    logger.info(f"[FileHandler-1.5.12] 当前存储路径配置: {self.storage_path}")
+                    logger.info("[FileHandler-1.6.2] LLM工具已注册")
+                    logger.info(f"[FileHandler-1.6.2] 当前存储路径配置: {self.storage_path}")
             except Exception as e:
-                logger.error(f"[FileHandler-1.5.12] 注册LLM工具时出错: {e}")
+                logger.error(f"[FileHandler-1.6.2] 注册LLM工具时出错: {e}")
         
-        logger.info(f"[FileHandler-1.5.12] 插件初始化成功!")
+        logger.info(f"[FileHandler-1.6.2] 插件初始化成功!")
         if self.debug_mode:
-            logger.info(f"[FileHandler-1.5.12] 存储路径: {self.storage_path}")
-            logger.info(f"[FileHandler-1.5.12] 调试模式: {'开启' if self.debug_mode else '关闭'}")
+            logger.info(f"[FileHandler-1.6.2] 存储路径: {self.storage_path}")
+            logger.info(f"[FileHandler-1.6.2] 调试模式: {'开启' if self.debug_mode else '关闭'}")
     
     async def _check_pending_timeouts(self):
         """定期检查等待接收的请求是否超时"""
@@ -221,9 +252,9 @@ class PluginMain(Star):
                         del pending_users[user_id]
                         # 发送超时提醒
                         if self.debug_mode:
-                            logger.info(f"[1.5.12] 群 {group_id} 用户 {user_id} 的文件接收请求已超时")
+                            logger.info(f"[1.6.2] 群 {group_id} 用户 {user_id} 的文件接收请求已超时")
                     
-                    # 如果该群没有等待的用户了，标记为可清理
+                    # 如果该群没有等待的用户了,标记为可清理
                     if not pending_users:
                         expired_groups.append(group_id)
                 
@@ -234,9 +265,112 @@ class PluginMain(Star):
                 await asyncio.sleep(5)  # 每5秒检查一次
                 
             except Exception as e:
-                logger.error(f"[1.5.12] 检查超时任务出错: {e}")
+                logger.error(f"[1.6.2] 检查超时任务出错: {e}")
                 await asyncio.sleep(10)
-    
+                
+    async def _handle_file_as_user_message(self, event, file_content: str, filename: str):
+        """将文件内容作为用户消息处理，触发AstrBot正常对话流程"""
+        try:
+            # 🔒 防递归安全检查
+            if getattr(event, '_auto_file_processed', False):
+                logger.info("[AutoRead-AI] 🔒 跳过已处理的消息（防递归）")
+                return
+                
+            logger.info(f"[AutoRead-AI] 开始处理文件: {filename}")
+            
+            # 正确的导入（只导入我们确定存在的模块）
+            from astrbot.core.platform.astrbot_message import AstrBotMessage, MessageMember
+            from astrbot.core.message.components import Plain
+            from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import AiocqhttpMessageEvent
+            import time
+            
+            # 1. 创建全新的干净消息对象
+            simulated_message = AstrBotMessage()
+            
+            # 2. 正确设置用户和会话信息（动态获取）
+            simulated_message.message_str = file_content.strip()
+            
+            # 3. 关键：正确设置发送者信息（从原始event获取）
+            original_sender = getattr(event.message_obj, 'sender', None)
+            if original_sender and hasattr(original_sender, 'user_id'):
+                # 复制原始发送者的所有关键信息
+                simulated_message.sender = MessageMember(user_id=original_sender.user_id)
+                simulated_message.sender.nickname = original_sender.nickname if original_sender.nickname else "用户"
+                simulated_message.user_id = original_sender.user_id
+            else:
+                # 从event获取用户信息
+                user_id = getattr(event.message_obj, 'user_id', getattr(event, 'user_id', 'unknown'))
+                sender_nickname = getattr(event.message_obj, 'sender_nickname', getattr(event, 'sender_nickname', '用户'))
+                
+                simulated_message.sender = MessageMember(user_id=user_id)
+                simulated_message.sender.nickname = sender_nickname
+                simulated_message.user_id = user_id
+                
+            # 确保所有ID一致
+            simulated_message.sender_id = simulated_message.user_id
+            simulated_message.group_id = getattr(event.message_obj, 'group_id', getattr(event, 'group_id', ''))
+            simulated_message.session_id = getattr(event, 'session_id', f"private_{simulated_message.user_id}")
+            simulated_message.timestamp = int(time.time())
+            simulated_message.unified_msg_origin = getattr(event, 'unified_msg_origin', '')
+            simulated_message.type = getattr(event.message_obj, 'type', None)
+            
+            # 4. 创建纯净的消息链
+            simulated_message.message = [Plain(text=file_content.strip())]
+            
+            # 5. 关键：创建平台特定事件（包含bot客户端）
+            bot_client = getattr(event, 'bot', None)
+            simulated_event = AiocqhttpMessageEvent(
+                message_str=simulated_message.message_str,
+                message_obj=simulated_message,
+                platform_meta=getattr(event, 'platform_meta', None),
+                session_id=simulated_message.session_id,
+                bot=bot_client,  # 关键：传递bot客户端，这样才能真正发送消息
+            )
+            
+            # 6. 添加防递归标记
+            simulated_event._auto_file_processed = True
+            
+            # 🔍 调试信息
+            logger.info(f"[AutoRead-AI] 创建模拟事件完成")
+            logger.info(f"[AutoRead-AI] 用户ID: {simulated_message.user_id}")
+            logger.info(f"[AutoRead-AI] 发送者昵称: {simulated_message.sender.nickname}")
+            logger.info(f"[AutoRead-AI] 会话ID: {simulated_message.session_id}")
+            logger.info(f"[AutoRead-AI] Bot客户端: {'存在' if bot_client else '不存在'}")
+            
+            # 7. 提交到事件队列触发完整处理流程
+            if hasattr(self.context, '_event_queue') and self.context._event_queue:
+                self.context._event_queue.put_nowait(simulated_event)
+                logger.info(f"[AutoRead-AI] 事件已提交到队列")
+            else:
+                # fallback: 直接调用tool_loop_agent（但我们已经知道这不是最佳方案）
+                logger.warning("[AutoRead-AI] 无法直接提交事件，使用fallback方案")
+                chat_provider_id = await self.context.get_current_chat_provider_id(event.unified_msg_origin)
+                response = await self.context.tool_loop_agent(
+                    prompt=file_content,
+                    event=event,
+                    chat_provider_id=chat_provider_id
+                )
+                
+                if response and hasattr(response, 'response_text'):
+                    await self._send_reply(event, response.response_text)
+                else:
+                    await self._send_reply(event, "文本处理未完成")
+                
+        except Exception as e:
+            logger.error(f"[AutoRead-AI] 处理出错: {e}", exc_info=True)
+            await self._send_reply(event, "文本处理出现问题")
+
+    async def _send_reply(self, event, message: str):
+        """统一的消息发送方法，兼容不同平台"""
+        try:
+            # 使用context.send_message方法（最可靠的发送方式）
+            from astrbot.api.event import MessageChain
+            message_chain = MessageChain().message(message)
+            await self.context.send_message(event.unified_msg_origin, message_chain)
+            logger.info(f"[AutoRead-AI] 消息发送成功，长度: {len(message)}")
+        except Exception as e:
+            logger.error(f"[AutoRead-AI] 消息发送失败: {e}")
+
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def on_message(self, event: AstrMessageEvent):
         try:
@@ -256,7 +390,7 @@ class PluginMain(Star):
             if is_group_message and self.group_whitelist:
                 whitelist_groups = [gid.strip() for gid in self.group_whitelist.split(',')]
                 if group_id not in whitelist_groups:
-                    return  # 不在白名单中，不处理
+                    return  # 不在白名单中,不处理
             
             # 处理文件消息
             if hasattr(message_obj, 'message') and message_obj.message:
@@ -265,7 +399,7 @@ class PluginMain(Star):
                     
                     if 'file' in component_name.lower() or component_name in ['File', 'FileComponent']:
                         if self.debug_mode:
-                            logger.info(f"[1.5.12] 检测到文件组件 - 索引: {i}, 类型: {component_name}")
+                            logger.info(f"[1.6.2] 检测到文件组件 - 索引: {i}, 类型: {component_name}")
                         
                         # 群聊文件处理
                         if is_group_message:
@@ -273,19 +407,19 @@ class PluginMain(Star):
                             user_id = self._get_user_id(event)
                             if (group_id in self.pending_group_receives and 
                                 user_id in self.pending_group_receives[group_id]):
-                                # 有等待的接收请求，处理文件
+                                # 有等待的接收请求,处理文件
                                 del self.pending_group_receives[group_id][user_id]  # 清理等待状态
                                 await self._handle_group_file_v159(event, component, group_id)
                             elif self.auto_receive_group_files:
                                 # 自动接收模式
                                 await self._handle_group_file_v159(event, component, group_id)
-                            # 否则忽略文件（没有等待请求且未开启自动接收）
+                            # 否则忽略文件(没有等待请求且未开启自动接收)
                         else:
                             # 私聊文件处理
                             await self._handle_private_file_v159(event, component)
                         
         except Exception as e:
-            logger.error(f"[FileHandler-1.5.12] 处理消息时出错: {e}")
+            logger.error(f"[FileHandler-1.6.2] 处理消息时出错: {e}")
             logger.exception(e)
     
     async def _handle_private_file_v159(self, event: AstrMessageEvent, file_component):
@@ -296,11 +430,11 @@ class PluginMain(Star):
             os.makedirs(user_storage_path, exist_ok=True)
             
             if self.debug_mode:
-                logger.info(f"[1.5.12] 处理私聊文件 - 用户: {user_id}, 存储路径: {user_storage_path}")
+                logger.info(f"[1.6.2] 处理私聊文件 - 用户: {user_id}, 存储路径: {user_storage_path}")
             
             # 检查用户文件数量限制并提醒删除
             removed_file = None
-            if not self._check_user_file_limit(user_id, user_storage_path, self.max_files_per_user):
+            if not self._check_file_limit(user_id, user_storage_path, self.max_files_per_user, "user"):
                 record_file = os.path.join(user_storage_path, '.file_records.json')
                 if os.path.exists(record_file):
                     with open(record_file, 'r', encoding='utf-8') as f:
@@ -312,17 +446,18 @@ class PluginMain(Star):
                             pass
                 
                 if self.send_completion_message:
-                    msg = "❌ 文件存储数量已达上限!"
-                    if removed_file:
-                        msg += f"\n已自动删除最旧文件: {removed_file}"
-                    msg += "\n请清理旧文件后再试。"
-                    await event.send(event.plain_result(msg))
-                return
+                    if self.send_completion_message:
+                        msg = "❌ 文件存储数量已达上限!"
+                        msg += "\n📥 检测到文件数量超限,正在自动删除最旧文件..." 
+                        if removed_file:
+                            msg += f"\n🗑️ 已自动删除最旧文件: {removed_file}"
+                        msg += "\n✅ 文件删除完成,现在可以接收新文件了。"
+                        await event.send(event.plain_result(msg))
             
             await self._process_file_download(event, file_component, user_storage_path, "user", user_id)
             
         except Exception as e:
-            logger.error(f"[FileHandler-1.5.12] 处理私聊文件时出错: {e}")
+            logger.error(f"[FileHandler-1.6.2] 处理私聊文件时出错: {e}")
             logger.exception(e)
     
     async def _handle_group_file_v159(self, event: AstrMessageEvent, file_component, group_id):
@@ -332,11 +467,11 @@ class PluginMain(Star):
             os.makedirs(group_storage_path, exist_ok=True)
             
             if self.debug_mode:
-                logger.info(f"[1.5.12] 处理群聊文件 - 群: {group_id}, 存储路径: {group_storage_path}")
+                logger.info(f"[1.6.2] 处理群聊文件 - 群: {group_id}, 存储路径: {group_storage_path}")
             
             # 检查群文件数量限制并提醒删除
             removed_file = None
-            if not self._check_group_file_limit(group_id, group_storage_path, self.max_files_per_group):
+            if not self._check_file_limit(group_id, group_storage_path, self.max_files_per_group, "group"):
                 record_file = os.path.join(group_storage_path, '.file_records.json')
                 if os.path.exists(record_file):
                     with open(record_file, 'r', encoding='utf-8') as f:
@@ -348,17 +483,18 @@ class PluginMain(Star):
                             pass
                 
                 if self.send_completion_message:
-                    msg = "❌ 群文件存储数量已达上限!"
-                    if removed_file:
-                        msg += f"\n已自动删除最旧文件: {removed_file}"
-                    msg += "\n请清理旧文件后再试。"
-                    await event.send(event.plain_result(msg))
-                return
+                    if self.send_completion_message:
+                        msg = "❌ 群文件存储数量已达上限!"
+                        msg += "\n📥 检测到群文件数量超限,正在自动删除最旧文件..." 
+                        if removed_file:
+                            msg += f"\n🗑️ 已自动删除最旧文件: {removed_file}"
+                        msg += "\n✅ 文件删除完成,现在可以接收新文件了。"
+                        await event.send(event.plain_result(msg))
             
             await self._process_file_download(event, file_component, group_storage_path, "group", group_id)
             
         except Exception as e:
-            logger.error(f"[FileHandler-1.5.12] 处理群聊文件时出错: {e}")
+            logger.error(f"[FileHandler-1.6.2] 处理群聊文件时出错: {e}")
             logger.exception(e)
     
     async def _process_file_download(self, event: AstrMessageEvent, file_component, storage_path, file_type, identifier):
@@ -371,9 +507,9 @@ class PluginMain(Star):
             file_size = file_attrs.get('size') or file_attrs.get('file_size', 0)
             
             if self.debug_mode:
-                logger.info(f"[1.5.12] {file_type}文件信息 - 名称: '{original_name}', 大小: {file_size} bytes")
-                logger.info(f"[1.5.12] 文件URL: {file_url}")
-                logger.info(f"[1.5.12] 文件ID: {file_id}")
+                logger.info(f"[1.6.2] {file_type}文件信息 - 名称: '{original_name}', 大小: {file_size} bytes")
+                logger.info(f"[1.6.2] 文件URL: {file_url}")
+                logger.info(f"[1.6.2] 文件ID: {file_id}")
             
             if self.max_file_size_mb > 0:
                 max_size_bytes = self.max_file_size_mb * 1024 * 1024
@@ -405,7 +541,7 @@ class PluginMain(Star):
                     
                     os.rename(temp_filepath, final_filepath)
                     if self.debug_mode:
-                        logger.info(f"[1.5.12] 文件已保存: {final_filepath}")
+                        logger.info(f"[1.6.2] 文件已保存: {final_filepath}")
                     
                     record_info = {
                         'identifier': identifier,
@@ -470,7 +606,7 @@ class PluginMain(Star):
                 self._save_record(record_file, record_info)
             
         except Exception as e:
-            logger.error(f"[FileHandler-1.5.12] 处理文件下载时出错: {e}")
+            logger.error(f"[FileHandler-1.6.2] 处理文件下载时出错: {e}")
             logger.exception(e)
     
     # ==================== 私聊指令 ====================
@@ -589,7 +725,7 @@ class PluginMain(Star):
             ]
             await event.send(event.chain_result(chain))
             if self.debug_mode:
-                logger.info(f"[1.5.12] 已发送文件: {filename}")
+                logger.info(f"[1.6.2] 已发送文件: {filename}")
             
         except ImportError:
             if hasattr(event, 'file_result'):
@@ -663,9 +799,9 @@ class PluginMain(Star):
             try:
                 os.remove(file_path)
                 if self.debug_mode:
-                    logger.info(f"[1.5.12] 已删除文件: {file_path}")
+                    logger.info(f"[1.6.2] 已删除文件: {file_path}")
             except Exception as e:
-                logger.error(f"[1.5.12] 删除文件时出错: {e}")
+                logger.error(f"[1.6.2] 删除文件时出错: {e}")
                 await event.send(event.plain_result(f"❌ 删除文件失败: {filename}"))
                 return
         
@@ -675,7 +811,7 @@ class PluginMain(Star):
         
         await event.send(event.plain_result(f"✅ 文件删除成功!\n文件名: {filename}"))
         if self.debug_mode:
-            logger.info(f"[1.5.12] 已删除文件记录: {filename}")
+            logger.info(f"[1.6.2] 已删除文件记录: {filename}")
     
     @filter.command("重置文件")
     async def reset_files(self, event: AstrMessageEvent):
@@ -697,9 +833,9 @@ class PluginMain(Star):
                         os.remove(file_path)
                         deleted_count += 1
                         if self.debug_mode:
-                            logger.info(f"[1.5.12] 已删除文件: {file_path}")
+                            logger.info(f"[1.6.2] 已删除文件: {file_path}")
                     except Exception as e:
-                        logger.error(f"[1.5.12] 删除文件时出错: {e}")
+                        logger.error(f"[1.6.2] 删除文件时出错: {e}")
         
         # 删除记录文件
         record_file = os.path.join(user_storage_path, '.file_records.json')
@@ -707,13 +843,13 @@ class PluginMain(Star):
             try:
                 os.remove(record_file)
                 if self.debug_mode:
-                    logger.info(f"[1.5.12] 已删除记录文件: {record_file}")
+                    logger.info(f"[1.6.2] 已删除记录文件: {record_file}")
             except Exception as e:
-                logger.error(f"[1.5.12] 删除记录文件时出错: {e}")
+                logger.error(f"[1.6.2] 删除记录文件时出错: {e}")
         
         await event.send(event.plain_result(f"✅ 私聊文件重置完成!\n共删除 {deleted_count} 个文件"))
         if self.debug_mode:
-            logger.info(f"[1.5.12] 用户 {user_id} 的私聊文件已重置")
+            logger.info(f"[1.6.2] 用户 {user_id} 的私聊文件已重置")
     
     # ==================== 群聊指令 ====================
     @filter.command("查看群文件")
@@ -839,7 +975,7 @@ class PluginMain(Star):
             ]
             await event.send(event.chain_result(chain))
             if self.debug_mode:
-                logger.info(f"[1.5.12] 已发送群文件: {filename}")
+                logger.info(f"[1.6.2] 已发送群文件: {filename}")
             
         except ImportError:
             if hasattr(event, 'file_result'):
@@ -917,9 +1053,9 @@ class PluginMain(Star):
             try:
                 os.remove(file_path)
                 if self.debug_mode:
-                    logger.info(f"[1.5.12] 已删除群文件: {file_path}")
+                    logger.info(f"[1.6.2] 已删除群文件: {file_path}")
             except Exception as e:
-                logger.error(f"[1.5.12] 删除群文件时出错: {e}")
+                logger.error(f"[1.6.2] 删除群文件时出错: {e}")
                 await event.send(event.plain_result(f"❌ 删除群文件失败: {filename}"))
                 return
         
@@ -929,7 +1065,7 @@ class PluginMain(Star):
         
         await event.send(event.plain_result(f"✅ 群文件删除成功!\n文件名: {filename}"))
         if self.debug_mode:
-            logger.info(f"[1.5.12] 已删除群文件记录: {filename}")
+            logger.info(f"[1.6.2] 已删除群文件记录: {filename}")
     
     @filter.command("重置群文件")
     async def reset_group_files(self, event: AstrMessageEvent):
@@ -955,9 +1091,9 @@ class PluginMain(Star):
                         os.remove(file_path)
                         deleted_count += 1
                         if self.debug_mode:
-                            logger.info(f"[1.5.12] 已删除群文件: {file_path}")
+                            logger.info(f"[1.6.2] 已删除群文件: {file_path}")
                     except Exception as e:
-                        logger.error(f"[1.5.12] 删除群文件时出错: {e}")
+                        logger.error(f"[1.6.2] 删除群文件时出错: {e}")
         
         # 删除记录文件
         record_file = os.path.join(group_storage_path, '.file_records.json')
@@ -965,13 +1101,13 @@ class PluginMain(Star):
             try:
                 os.remove(record_file)
                 if self.debug_mode:
-                    logger.info(f"[1.5.12] 已删除群记录文件: {record_file}")
+                    logger.info(f"[1.6.2] 已删除群记录文件: {record_file}")
             except Exception as e:
-                logger.error(f"[1.5.12] 删除群记录文件时出错: {e}")
+                logger.error(f"[1.6.2] 删除群记录文件时出错: {e}")
         
         await event.send(event.plain_result(f"✅ 群 {group_id} 文件重置完成!\n共删除 {deleted_count} 个文件"))
         if self.debug_mode:
-            logger.info(f"[1.5.12] 群 {group_id} 的文件已重置")
+            logger.info(f"[1.6.2] 群 {group_id} 的文件已重置")
     
     @filter.command("接收群文件")
     async def receive_group_file(self, event: AstrMessageEvent):
@@ -981,7 +1117,7 @@ class PluginMain(Star):
             return
         
         if self.auto_receive_group_files:
-            await event.send(event.plain_result("✅ 自动接收群文件已开启，无需手动接收"))
+            await event.send(event.plain_result("✅ 自动接收群文件已开启,无需手动接收"))
             return
         
         group_id = str(event.message_obj.group_id)
@@ -999,7 +1135,7 @@ class PluginMain(Star):
         ))
         
         if self.debug_mode:
-            logger.info(f"[1.5.12] 群 {group_id} 用户 {user_id} 开始等待文件接收，超时时间: {timeout_msg}秒")
+            logger.info(f"[1.6.2] 群 {group_id} 用户 {user_id} 开始等待文件接收,超时时间: {timeout_msg}秒")
     
     def _get_user_id(self, event: AstrMessageEvent):
         """获取用户ID"""
@@ -1016,59 +1152,42 @@ class PluginMain(Star):
             return f"{sender_name}_{platform}"
             
         except Exception as e:
-            logger.error(f"[1.5.12] 获取用户ID时出错: {e}")
+            logger.error(f"[1.6.2] 获取用户ID时出错: {e}")
             return "unknown_user"
     
-    def _check_user_file_limit(self, user_id, user_storage_path, max_files):
-        """检查用户文件数量限制"""
+
+    def _check_file_limit(self, entity_id, storage_path, max_files, entity_type="user"):
+        """通用文件数量限制检查"""
         try:
-            record_file = os.path.join(user_storage_path, '.file_records.json')
+            record_file = os.path.join(storage_path, '.file_records.json')
             if not os.path.exists(record_file):
                 return True
-            
+
             with open(record_file, 'r', encoding='utf-8') as f:
                 try:
                     records = json.load(f)
                     success_records = [r for r in records if r.get('download_status') == 'success']
-                    
+
                     if len(success_records) >= max_files:
-                        self._remove_oldest_file(success_records, user_storage_path, record_file)
-                        return False
+                        entity_desc = "用户" if entity_type == "user" else "群"
+                        logger.warning(f"[1.6.2] 检测到{entity_desc}文件数量已达上限({max_files})")
+                        logger.info(f"[1.6.2] 准备删除最旧文件以腾出空间")
+                        logger.warning(f"[1.6.2] {entity_desc}文件数量已达上限({max_files}),将自动删除最旧文件")
+                        self._remove_oldest_file(success_records, storage_path, record_file)
+                        logger.info(f"[1.6.2] 已自动删除最旧文件,为新文件腾出空间")
+                        logger.info(f"[1.6.2] 文件删除完成,允许接收新文件")
+                        return True
                     else:
                         return True
-                        
+
                 except:
                     return True
-                    
+
         except Exception as e:
-            logger.error(f"[1.5.12] 检查用户文件限制时出错: {e}")
+            entity_desc = "用户" if entity_type == "user" else "群"
+            logger.error(f"[1.6.2] 检查{entity_desc}文件限制时出错: {e}")
             return True
-    
-    def _check_group_file_limit(self, group_id, group_storage_path, max_files):
-        """检查群文件数量限制"""
-        try:
-            record_file = os.path.join(group_storage_path, '.file_records.json')
-            if not os.path.exists(record_file):
-                return True
-            
-            with open(record_file, 'r', encoding='utf-8') as f:
-                try:
-                    records = json.load(f)
-                    success_records = [r for r in records if r.get('download_status') == 'success']
-                    
-                    if len(success_records) >= max_files:
-                        self._remove_oldest_file(success_records, group_storage_path, record_file)
-                        return False
-                    else:
-                        return True
-                        
-                except:
-                    return True
-                    
-        except Exception as e:
-            logger.error(f"[1.5.12] 检查群文件限制时出错: {e}")
-            return True
-    
+            # [v1.6.2] 删除旧文件后继续处理新文件\n
     def _remove_oldest_file(self, records, storage_path, record_file):
         """删除最旧的文件"""
         try:
@@ -1080,16 +1199,16 @@ class PluginMain(Star):
                 try:
                     os.remove(file_path)
                     if self.debug_mode:
-                        logger.info(f"[1.5.12] 已删除最旧文件: {file_path}")
+                        logger.info(f"[1.6.2] 已删除最旧文件: {file_path}")
                 except Exception as e:
-                    logger.error(f"[1.5.12] 删除文件时出错: {e}")
+                    logger.error(f"[1.6.2] 删除文件时出错: {e}")
             
             remaining_records = records[1:]
             with open(record_file, 'w', encoding='utf-8') as f:
                 json.dump(remaining_records, f, ensure_ascii=False, indent=2)
                 
         except Exception as e:
-            logger.error(f"[1.5.12] 删除最旧文件时出错: {e}")
+            logger.error(f"[1.6.2] 删除最旧文件时出错: {e}")
     
     def _smart_filename_handling(self, original_name, detected_type, file_path):
         """智能文件名处理"""
@@ -1108,7 +1227,7 @@ class PluginMain(Star):
                     (original_ext in ['.pptx', '.ppt'] and detected_ext in ['.pptx', '.ppt'])):
                     
                     if self.debug_mode:
-                        logger.info(f"[1.5.12] 使用有效的原始文件名: {original_name}")
+                        logger.info(f"[1.6.2] 使用有效的原始文件名: {original_name}")
                     return self._sanitize_filename(original_name)
             
             name_without_ext = os.path.splitext(original_name)[0]
@@ -1121,7 +1240,7 @@ class PluginMain(Star):
             return self._sanitize_filename(final_name)
             
         except Exception as e:
-            logger.error(f"[1.5.12] 智能文件名处理出错: {e}")
+            logger.error(f"[1.6.2] 智能文件名处理出错: {e}")
             timestamp = int(time.time())
             return f"file_{timestamp}{detected_type}"
     
@@ -1137,7 +1256,7 @@ class PluginMain(Star):
 类型: {filetype}
 路径: {filepath}
 
-💡 提示: 由于环境限制，原始文件名无法获取
+💡 提示: 由于环境限制,原始文件名无法获取
 系统已为您生成新的文件名: {filename}"""
             else:
                 completion_msg = f"""✅ {'群' if file_type == 'group' else '私聊'}文件接收成功!
@@ -1149,10 +1268,50 @@ class PluginMain(Star):
             
             await event.send(event.plain_result(completion_msg))
             if self.debug_mode:
-                logger.info(f"[1.5.12] 已发送完成消息: {filename}")
-            
+                logger.info(f"[1.6.2] 已发送完成消息: {filename}")
+            # 自动读取文本文件内容功能
+            if self.auto_read_content:
+                # 检查文件大小限制
+                try:
+                    file_size = os.path.getsize(filepath)
+                    max_size = self.max_auto_read_size
+
+                    if file_size <= max_size:
+                        # 检查是否为文本文件
+                        if self._is_text_file_safe(filepath):
+                            # 读取文件内容
+                            content = self._read_text_file_safely(filepath)
+                            if content:
+                                logger.info(f"[AutoRead] 自动读取文本文件内容: {filename}")
+                                
+                                # 核心功能:将文件内容作为用户消息处理,触发AI自然回复
+                                try:
+                                    clean_content = content.strip()
+                                    if len(clean_content) > self.max_auto_read_size:
+                                        clean_content = clean_content[:self.max_auto_read_size] + "\n[内容已截断,原文过长]"
+                                    
+                                    await self._handle_file_as_user_message(event, clean_content, filename)
+                                    logger.info(f"[AutoRead-AI] 已提交AI处理文件内容")
+                                except Exception as ai_error:
+                                    logger.error(f"[AutoRead-AI] AI处理失败: {ai_error}")
+                                    # AI处理失败时的降级处理
+                                    try:
+                                        await self._send_reply(event, f"📄 文件内容:\n{content[:500]}...")
+                                    except:
+                                        try:
+                                            from astrbot.api.event import MessageChain
+                                            message_chain = MessageChain().message(f"📄 文件已读取并提交AI分析")
+                                            await self.context.send_message(event.unified_msg_origin, message_chain)
+                                        except:
+                                            pass
+                            else:
+                                logger.info(f"[AutoRead] 文件内容为空或读取失败")
+                    else:
+                        logger.info(f"[AutoRead] 文件过大,跳过自动读取: {file_size} bytes > {max_size} bytes")
+                except Exception as size_error:
+                    logger.error(f"[AutoRead] 检查文件时出错: {size_error}")
         except Exception as e:
-            logger.error(f"[1.5.12] 发送完成消息出错: {e}")
+            logger.error(f"[1.6.2] 发送完成消息出错: {e}")
     
     def _format_file_size(self, size_bytes):
         """格式化文件大小"""
@@ -1166,169 +1325,103 @@ class PluginMain(Star):
             return f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"
     
     def _detect_file_type_detailed(self, filepath):
-        """增强的文件类型检测 - 修复PPTX识别问题"""
+        """增强的文件类型检测 - 修复PPTX识别问题和文本文件识别问题
+        
+        支持五层检测机制:
+        1. filetype库检测
+        2. 文本文件检测
+        3. 文件头特征分析
+        4. 二进制文件判断
+        5. 默认类型返回
+        """
+        import os
+        
+        # 检查文件是否存在
+        if not os.path.exists(filepath):
+            return ".bin"
+        
+        # [v1.6.2] 第一层检测:使用filetype库(如果可用)
+        try:
+            import filetype
+            kind = filetype.guess(filepath)
+            if kind is not None:
+                detected_ext = f".{kind.extension}"
+                if self.debug_mode:
+                    logger.info(f"[1.6.2] filetype库检测结果: {kind.mime} -> {detected_ext}")
+                # 特别处理Office文件以确保准确性
+                if detected_ext in ['.docx', '.xlsx', '.pptx', '.doc', '.xls', '.ppt']:
+                    return detected_ext
+                # 对于已知文本类型,直接返回
+                text_types = ['.txt', '.py', '.c', '.cpp', '.h', '.java', '.js', '.html', '.css', '.xml', '.json', '.yaml', '.yml', '.md', '.csv', '.log']
+                if detected_ext in text_types:
+                    return detected_ext
+        except ImportError:
+            if self.debug_mode:
+                logger.debug("[1.6.2] filetype库未安装,跳过第一层检测")
+        except Exception as e:
+            if self.debug_mode:
+                logger.warning(f"[1.6.2] filetype库检测异常: {e}")
+        
+        # [v1.6.2] 第二层检测:文本文件检测
+        try:
+            is_text, encoding = self._is_text_file_safe(filepath)
+            if is_text:
+                if self.debug_mode:
+                    logger.info(f"[1.6.2] 检测到文本文件,编码: {encoding}")
+                return ".txt"
+        except Exception as e:
+            if self.debug_mode:
+                logger.warning(f"[1.6.2] 文本文件检测异常: {e}")
+        
+        # [v1.6.2] 第三层检测:文件头特征分析
         try:
             with open(filepath, 'rb') as f:
-                header = f.read(1024)
+                header = f.read(1024)  # 读取前1024字节
             
-            if self.debug_mode:
-                logger.info(f"[1.5.12] 文件头检测开始 - 文件: {filepath}")
-            
-            # EXE文件
-            if header.startswith(b'MZ'):
-                if self.debug_mode:
-                    logger.info(f"[1.5.12] 检测到EXE文件")
-                return '.exe'
-            
-            # ZIP系列
-            if header.startswith(b'PK'):
-                if self.debug_mode:
-                    logger.info(f"[1.5.12] 检测到ZIP系列文件")
-                with zipfile.ZipFile(filepath, 'r') as zip_ref:
-                    namelist = zip_ref.namelist()
-                    if self.debug_mode:
-                        logger.info(f"[1.5.12] ZIP文件内容: {namelist[:10]}")  # 只显示前10个
-                    
-                    # PPTX文件检测
-                    if any(name.startswith('ppt/') for name in namelist):
-                        if self.debug_mode:
-                            logger.info(f"[1.5.12] 检测到PPTX文件")
-                        return '.pptx'
-                    
-                    # DOCX文件检测
-                    if '[Content_Types].xml' in namelist:
-                        if self.debug_mode:
-                            logger.info(f"[1.5.12] 检测到DOCX文件")
-                        return '.docx'
-                    
-                    # XLSX文件检测
-                    if 'xl/' in str(namelist):
-                        if self.debug_mode:
-                            logger.info(f"[1.5.12] 检测到XLSX文件")
-                        return '.xlsx'
-                    
-                    # PPT文件检测
-                    if any(name.startswith('PowerPoint Document') for name in namelist):
-                        if self.debug_mode:
-                            logger.info(f"[1.5.12] 检测到PPT文件")
-                        return '.ppt'
-                
-                if self.debug_mode:
-                    logger.info(f"[1.5.12] 检测为普通ZIP文件")
-                return '.zip'
-            
-            # TAR文件
-            if header.startswith(b'ustar\x00') or header.startswith(b'ustar\x20'):
-                if self.debug_mode:
-                    logger.info(f"[1.5.12] 检测到TAR文件")
-                return '.tar'
-            
-            # GZ文件
-            if header.startswith(b'\x1f\x8b'):
-                if self.debug_mode:
-                    logger.info(f"[1.5.12] 检测到GZ文件")
-                return '.gz'
-            
-            # 7Z
-            elif header.startswith(b'7z\xbc\xaf\x27\x1c'):
-                if self.debug_mode:
-                    logger.info(f"[1.5.12] 检测到7Z文件")
-                return '.7z'
-            
-            # RAR
-            elif header.startswith(b'Rar!\x1a\x07\x00') or header.startswith(b'Rar!\x1a\x07\x01\x00'):
-                if self.debug_mode:
-                    logger.info(f"[1.5.12] 检测到RAR文件")
-                return '.rar'
-            
-            # Office文档
-            elif header.startswith(b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1'):
-                if self.debug_mode:
-                    logger.info(f"[1.5.12] 检测到Office文档")
-                return '.doc'
-            
-            # PDF
-            elif header.startswith(b'%PDF'):
-                if self.debug_mode:
-                    logger.info(f"[1.5.12] 检测到PDF文件")
-                return '.pdf'
-            
-            # 图片格式
+            # 检查常见的文件头特征
+            if header.startswith(b'\x89PNG\r\n\x1a\n'):
+                return ".png"
             elif header.startswith(b'\xff\xd8\xff'):
-                if self.debug_mode:
-                    logger.info(f"[1.5.12] 检测到JPG文件")
-                return '.jpg'
-            elif header.startswith(b'\x89PNG\r\n\x1a\n'):
-                if self.debug_mode:
-                    logger.info(f"[1.5.12] 检测到PNG文件")
-                return '.png'
+                return ".jpg"
             elif header.startswith(b'GIF87a') or header.startswith(b'GIF89a'):
-                if self.debug_mode:
-                    logger.info(f"[1.5.12] 检测到GIF文件")
-                return '.gif'
-            
-            # 文本文件检测
-            try:
-                with open(filepath, 'rb') as f:
-                    sample = f.read(512)
-                
-                if all(c < 128 for c in sample[:100]) and b'\x00' not in sample[:100]:
-                    sample_str = sample.decode('utf-8', errors='ignore')
-                    if self.debug_mode:
-                        logger.info(f"[1.5.12] 检测到文本文件，内容预览: {sample_str[:100]}")
-                    
-                    if '<?xml' in sample_str[:100]:
-                        if self.debug_mode:
-                            logger.info(f"[1.5.12] 检测到XML文件")
-                        return '.xml'
-                    elif '<?php' in sample_str[:100]:
-                        if self.debug_mode:
-                            logger.info(f"[1.5.12] 检测到PHP文件")
-                        return '.php'
-                    elif '<html' in sample_str.lower()[:100]:
-                        if self.debug_mode:
-                            logger.info(f"[1.5.12] 检测到HTML文件")
-                        return '.html'
-                    elif 'def ' in sample_str[:200] and ':' in sample_str[:200]:
-                        if self.debug_mode:
-                            logger.info(f"[1.5.12] 检测到Python文件")
-                        return '.py'
-                    elif '#include' in sample_str[:200]:
-                        if self.debug_mode:
-                            logger.info(f"[1.5.12] 检测到C/C++文件")
-                        return '.cpp'
-                    elif 'public class' in sample_str[:200] or 'public static' in sample_str[:200]:
-                        if self.debug_mode:
-                            logger.info(f"[1.5.12] 检测到Java文件")
-                        return '.java'
-                    elif 'function' in sample_str[:200] or 'var ' in sample_str[:200]:
-                        if self.debug_mode:
-                            logger.info(f"[1.5.12] 检测到JavaScript文件")
-                        return '.js'
-                    elif '@charset' in sample_str[:100] or 'background:' in sample_str[:200]:
-                        if self.debug_mode:
-                            logger.info(f"[1.5.12] 检测到CSS文件")
-                        return '.css'
-                    else:
-                        if self.debug_mode:
-                            logger.info(f"[1.5.12] 检测到普通文本文件")
-                        return '.txt'
-                else:
-                    if self.debug_mode:
-                        logger.info(f"[1.5.12] 检测到二进制文件")
-                    return '.bin'
-                    
-            except Exception as e:
-                if self.debug_mode:
-                    logger.error(f"[1.5.12] 文本文件检测出错: {e}")
-                return '.bin'
-                
+                return ".gif"
+            elif header.startswith(b'%PDF'):
+                return ".pdf"
+            elif header.startswith(b'PK'):
+                # ZIP文件,可能是Office文档
+                return ".zip"
+            elif header.startswith(b'\x1f\x8b'):
+                return ".gz"
+            elif header.startswith(b'Rar!'):
+                return ".rar"
         except Exception as e:
-            logger.error(f"[1.5.12] 文件类型检测出错: {e}")
             if self.debug_mode:
-                logger.exception(e)
-            return '.bin'
-    
+                logger.warning(f"[1.6.2] 文件头检测异常: {e}")
+        
+        # [v1.6.2] 第四层检测:二进制文件判断
+        try:
+            with open(filepath, 'rb') as f:
+                sample = f.read(1024)
+            
+            # 检查是否包含大量不可打印字符
+            if sample:
+                non_printable = sum(1 for byte in sample if byte < 32 and byte not in [9, 10, 13])
+                printable_ratio = 1 - (non_printable / len(sample))
+                
+                if printable_ratio < 0.7:  # 如果可打印字符少于70%,认为是二进制文件
+                    if self.debug_mode:
+                        logger.info(f"[1.6.2] 检测到二进制文件,可打印字符比例: {printable_ratio:.2f}")
+                    return ".bin"
+        except Exception as e:
+            if self.debug_mode:
+                logger.warning(f"[1.6.2] 二进制文件检测异常: {e}")
+        
+        # [v1.6.2] 第五层检测:默认返回策略
+        # 如果前面都无法确定,优先返回.txt而不是.bin
+        if self.debug_mode:
+            logger.info("[1.6.2] 无法确定文件类型,返回默认.txt")
+        return ".txt"
+
     def _extract_file_attributes(self, file_component):
         """提取文件属性"""
         attrs = {}
@@ -1342,35 +1435,35 @@ class PluginMain(Star):
                 except:
                     pass
         except Exception as e:
-            logger.error(f"[1.5.12] 提取属性时出错: {e}")
+            logger.error(f"[1.6.2] 提取属性时出错: {e}")
         return attrs
     
     def _extract_filename(self, file_attrs):
         """提取文件名"""
         filename = (file_attrs.get('name') or 
-                   file_attrs.get('filename') or 
-                   file_attrs.get('file_name') or 
-                   'unknown_file')
+                file_attrs.get('filename') or 
+                file_attrs.get('file_name') or 
+                'unknown_file')
         result = self._sanitize_filename(filename) if filename else 'unknown_file'
         if self.debug_mode:
-            logger.info(f"[1.5.12] 提取文件名: '{filename}' -> '{result}'")
+            logger.info(f"[1.6.2] 提取文件名: '{filename}' -> '{result}'")
         return result
     
     def _extract_file_url(self, file_attrs):
         """提取文件URL"""
         url = (file_attrs.get('url') or 
-               file_attrs.get('file_url') or 
-               file_attrs.get('path') or 
-               file_attrs.get('file_path'))
+            file_attrs.get('file_url') or 
+            file_attrs.get('path') or 
+            file_attrs.get('file_path'))
         if self.debug_mode and url:
-            logger.info(f"[1.5.12] 提取文件URL: {url[:100]}...")  # 只显示前100字符
+            logger.info(f"[1.6.2] 提取文件URL: {url[:100]}...")  # 只显示前100字符
         return url
     
     async def _download_to_temp(self, url, temp_path):
         """下载到临时文件"""
         try:
             if self.debug_mode:
-                logger.info(f"[1.5.12] 开始下载: {url[:100]}...")  # 只显示前100字符
+                logger.info(f"[1.6.2] 开始下载: {url[:100]}...")  # 只显示前100字符
             
             timeout = aiohttp.ClientTimeout(total=120)
             async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -1380,16 +1473,16 @@ class PluginMain(Star):
                             async for chunk in response.content.iter_chunked(8192):
                                 f.write(chunk)
                         if self.debug_mode:
-                            logger.info(f"[1.5.12] 下载成功: {temp_path}")
+                            logger.info(f"[1.6.2] 下载成功: {temp_path}")
                         return True
                     else:
                         if self.debug_mode:
-                            logger.error(f"[1.5.12] 下载失败 HTTP {response.status}")
+                            logger.error(f"[1.6.2] 下载失败 HTTP {response.status}")
                         return False
                         
         except Exception as e:
             if self.debug_mode:
-                logger.error(f"[1.5.12] 下载出错: {e}")
+                logger.error(f"[1.6.2] 下载出错: {e}")
             return False
     
     async def _cleanup_task(self):
@@ -1400,7 +1493,7 @@ class PluginMain(Star):
                     await asyncio.sleep(3600)
                     self._cleanup_expired_files()
             except Exception as e:
-                logger.error(f"[1.5.12] 清理任务出错: {e}")
+                logger.error(f"[1.6.2] 清理任务出错: {e}")
                 await asyncio.sleep(60)
     
     def _cleanup_expired_files(self):
@@ -1436,9 +1529,9 @@ class PluginMain(Star):
                                 try:
                                     os.remove(file_path)
                                     if self.debug_mode:
-                                        logger.info(f"[1.5.12] 已删除过期文件: {file_path}")
+                                        logger.info(f"[1.6.2] 已删除过期文件: {file_path}")
                                 except Exception as e:
-                                    logger.error(f"[1.5.12] 删除文件出错: {e}")
+                                    logger.error(f"[1.6.2] 删除文件出错: {e}")
                         else:
                             valid_records.append(record)
                     
@@ -1446,10 +1539,10 @@ class PluginMain(Star):
                         json.dump(valid_records, f, ensure_ascii=False, indent=2)
                     
                     if expired_records and self.debug_mode:
-                        logger.info(f"[1.5.12] 目录 {item} 清理了 {len(expired_records)} 个过期文件")
+                        logger.info(f"[1.6.2] 目录 {item} 清理了 {len(expired_records)} 个过期文件")
                         
         except Exception as e:
-            logger.error(f"[1.5.12] 清理过期文件出错: {e}")
+            logger.error(f"[1.6.2] 清理过期文件出错: {e}")
     
     def _ensure_unique_filename(self, filepath):
         """确保文件名唯一"""
@@ -1464,7 +1557,7 @@ class PluginMain(Star):
                 break
         
         if self.debug_mode and counter > 1:
-            logger.info(f"[1.5.12] 文件名冲突，生成唯一文件名: {filepath}")
+            logger.info(f"[1.6.2] 文件名冲突,生成唯一文件名: {filepath}")
         
         return filepath
     
@@ -1483,7 +1576,7 @@ class PluginMain(Star):
         
         return filename if filename else 'unnamed_file.bin'
     
-    def _save_record(self, record_file, record_info):
+    async def _save_record(self, record_file, record_info):
         """保存记录"""
         try:
             records = []
@@ -1500,15 +1593,15 @@ class PluginMain(Star):
                 json.dump(records, f, ensure_ascii=False, indent=2)
                 
             if self.debug_mode:
-                logger.info(f"[1.5.12] 记录已保存")
+                logger.info(f"[1.6.2] 记录已保存")
                 
         except Exception as e:
-            logger.error(f"[1.5.12] 保存记录出错: {e}")
+            logger.error(f"[1.6.2] 保存记录出错: {e}")
     
     @filter.command("filestatus")
     async def file_status(self, event: AstrMessageEvent):
         """查看插件状态"""
-        status_msg = f"""📁 文件处理器状态 (v1.5.12):
+        status_msg = f"""📁 文件处理器状态 (v1.6.2):
 存储路径: {self.storage_path}
 自动清理: {'✅ 启用' if self.auto_cleanup_enabled else '❌ 禁用'}
 清理天数: {self.cleanup_days}天
@@ -1521,7 +1614,82 @@ class PluginMain(Star):
 接收超时时间: {self.group_file_receive_timeout}秒
 LLM工具支持: {'✅ 启用' if LLM_TOOL_SUPPORT else '❌ 禁用'}
 调试模式: {'✅ 开启' if self.debug_mode else '❌ 关闭'}"""
+
+    def _is_text_file(self, file_path: str) -> bool:
+        """检查是否为文本文件"""
+        text_extensions = {
+            ".txt", ".py", ".c", ".cpp", ".h", ".java", ".js", ".html", 
+            ".css", ".xml", ".json", ".yaml", ".yml", ".md", ".log", ".csv"
+        }
         
-        await event.send(event.plain_result(status_msg))
+        _, ext = os.path.splitext(file_path.lower())
+        return ext in text_extensions
+
+    def _is_text_file_safe(self, filepath):
+        """安全地检测是否为文本文件"""
+        import os
+        
+        # 检查文件是否存在
+        if not os.path.exists(filepath):
+            return False, None
+        
+        encodings = ['utf-8', 'gbk', 'gb2312', 'latin1']
+        
+        for encoding in encodings:
+            try:
+                with open(filepath, 'r', encoding=encoding) as f:
+                    # 读取前几KB来检测
+                    sample = f.read(4096)
+                    # 检查是否包含过多的控制字符
+                    if sample:  # 确保sample不为空
+                        control_chars = sum(1 for c in sample if ord(c) < 32 and c not in '\t\n\r')
+                        if control_chars / len(sample) > 0.3:
+                            continue  # 控制字符过多,可能不是文本文件
+                    return True, encoding
+            except UnicodeDecodeError:
+                continue
+            except Exception:
+                continue
+        
+        return False, None
+
+        
+        for encoding in encodings:
+            try:
+                with open(file_path, "r", encoding=encoding) as f:
+                    content = f.read()
+                    # 限制内容长度以避免过长消息
+                    if len(content) > 2000:
+                        content = content[:2000] + "\n[内容已截断,原文过长]"
+                    return content
+            except UnicodeDecodeError:
+                continue
+            except Exception as e:
+                logger.error(f"[AutoRead] 读取文件时出错: {e}")
+                return ""
+        
+        logger.warning(f"[AutoRead] 无法解码文件: {file_path}")
+        return ""
+
+    def _read_text_file_safely(self, file_path: str) -> str:
+        """安全地读取文本文件内容"""
+        encodings = ["utf-8", "gbk", "gb2312", "latin1"]
+        
+        for encoding in encodings:
+            try:
+                with open(file_path, "r", encoding=encoding) as f:
+                    content = f.read()
+                    # 限制内容长度以避免过长消息
+                    if len(content) > self.max_auto_read_size:
+                        content = content[:self.max_auto_read_size] + "\n[内容已截断,原文过长]"
+                    return content
+            except UnicodeDecodeError:
+                continue
+            except Exception as e:
+                logger.error(f"[AutoRead] 读取文件时出错: {e}")
+                return ""
+        
+        logger.warning(f"[AutoRead] 无法解码文件: {file_path}")
+        return ""
 
 AutoFileHandlerPlugin = PluginMain

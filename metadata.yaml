@@ -1,6 +1,6 @@
 name: astrbot_plugin_auto_file_handler
 display_name: 自动文件管理器 # 用于展示的名字，可以是方便人类阅读的名字（需要版本 >= v4.5.0，低版本不会报错，请放心填写）
 desc: 接收，发送群聊/私聊中的文件到配置的指定目录的独立子文件目录下，可用于文件管理/插件调用/优化容器环境下的文件传输 # 插件简短描述
-version: v1.5.12 # 插件版本号。格式：v1.1.1 或者 v1.1
+version: "1.6.2"
 author: Noctfom # 作者
 repo: https://github.com/Noctfom/astrbot-plugin-auto-file-handler # 插件的仓库地址

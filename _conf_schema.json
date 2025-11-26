@@ -65,5 +65,17 @@
     "type": "bool",
     "default": false,
     "hint": "开启后将在日志中显示详细的文件操作过程"
+  },
+  "max_auto_read_size": {
+    "description": "文本文件自动读取大小限制（字符数，0表示无限制）",
+    "type": "int",
+    "default": 2000,
+    "hint": "自动读取文本文件内容时的最大字符数，超出部分将被截取"
+  },
+  "auto_read_content": {
+    "description": "是否自动读取文本文件内容",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后将自动读取文本文件内容并提交给AI处理"
   }
 }
