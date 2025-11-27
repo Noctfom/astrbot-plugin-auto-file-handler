@@ -560,7 +560,7 @@ class PluginMain(Star):
                     }
                     
                     record_file = os.path.join(storage_path, '.file_records.json')
-                    self._save_record(record_file, record_info)
+                    await self._save_record(record_file, record_info)
                     
                     if self.send_completion_message:
                         actual_size = os.path.getsize(final_filepath)
@@ -584,7 +584,7 @@ class PluginMain(Star):
                     }
                     
                     record_file = os.path.join(storage_path, '.file_records.json')
-                    self._save_record(record_file, record_info)
+                    await self._save_record(record_file, record_info)
                     
                     if self.send_completion_message:
                         await event.send(event.plain_result(f"❌ 文件 {original_name} 下载失败!"))
@@ -603,7 +603,7 @@ class PluginMain(Star):
                 }
                 
                 record_file = os.path.join(storage_path, '.file_records.json')
-                self._save_record(record_file, record_info)
+                await self._save_record(record_file, record_info)
             
         except Exception as e:
             logger.error(f"[FileHandler-1.6.2] 处理文件下载时出错: {e}")
@@ -1278,7 +1278,7 @@ class PluginMain(Star):
 
                     if file_size <= max_size:
                         # 检查是否为文本文件
-                        if self._is_text_file_safe(filepath):
+                        if self._is_plain_text_file(filename):
                             # 读取文件内容
                             content = self._read_text_file_safely(filepath)
                             if content:
@@ -1305,13 +1305,20 @@ class PluginMain(Star):
                                         except:
                                             pass
                             else:
-                                logger.info(f"[AutoRead] 文件内容为空或读取失败")
+                                logger.info(f"[AutoRead] 文件格式不正确")
                     else:
-                        logger.info(f"[AutoRead] 文件过大,跳过自动读取: {file_size} bytes > {max_size} bytes")
+                        logger.info(f"[AutoRead] 文件过大或格式不对,跳过自动读取: {file_size} bytes > {max_size} bytes")
                 except Exception as size_error:
                     logger.error(f"[AutoRead] 检查文件时出错: {size_error}")
+
         except Exception as e:
             logger.error(f"[1.6.2] 发送完成消息出错: {e}")
+    
+    def _is_plain_text_file(self, filename):
+        """判断是否为纯文本文件"""
+        text_extensions = {'.txt', '.py', '.js', '.html', '.css', '.json', '.xml', '.md', '.log', '.csv', '.ini', '.cfg', '.yml', '.yaml'}
+        _, ext = os.path.splitext(filename.lower())
+        return ext in text_extensions
     
     def _format_file_size(self, size_bytes):
         """格式化文件大小"""
@@ -1652,24 +1659,6 @@ LLM工具支持: {'✅ 启用' if LLM_TOOL_SUPPORT else '❌ 禁用'}
                 continue
         
         return False, None
-
-        
-        for encoding in encodings:
-            try:
-                with open(file_path, "r", encoding=encoding) as f:
-                    content = f.read()
-                    # 限制内容长度以避免过长消息
-                    if len(content) > 2000:
-                        content = content[:2000] + "\n[内容已截断,原文过长]"
-                    return content
-            except UnicodeDecodeError:
-                continue
-            except Exception as e:
-                logger.error(f"[AutoRead] 读取文件时出错: {e}")
-                return ""
-        
-        logger.warning(f"[AutoRead] 无法解码文件: {file_path}")
-        return ""
 
     def _read_text_file_safely(self, file_path: str) -> str:
         """安全地读取文本文件内容"""
