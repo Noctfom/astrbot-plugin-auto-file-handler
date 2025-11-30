@@ -1355,12 +1355,6 @@ class PluginMain(Star):
                 detected_ext = f".{kind.extension}"
                 if self.debug_mode:
                     logger.info(f"[1.6.2] filetype库检测结果: {kind.mime} -> {detected_ext}")
-                # 特别处理Office文件以确保准确性
-                if detected_ext in ['.docx', '.xlsx', '.pptx', '.doc', '.xls', '.ppt']:
-                    return detected_ext
-                # 对于已知文本类型,直接返回
-                text_types = ['.txt', '.py', '.c', '.cpp', '.h', '.java', '.js', '.html', '.css', '.xml', '.json', '.yaml', '.yml', '.md', '.csv', '.log']
-                if detected_ext in text_types:
                     return detected_ext
         except ImportError:
             if self.debug_mode:
@@ -1368,22 +1362,11 @@ class PluginMain(Star):
         except Exception as e:
             if self.debug_mode:
                 logger.warning(f"[1.6.2] filetype库检测异常: {e}")
-        
-        # [v1.6.2] 第二层检测:文本文件检测
-        try:
-            is_text, encoding = self._is_text_file_safe(filepath)
-            if is_text:
-                if self.debug_mode:
-                    logger.info(f"[1.6.2] 检测到文本文件,编码: {encoding}")
-                return ".txt"
-        except Exception as e:
-            if self.debug_mode:
-                logger.warning(f"[1.6.2] 文本文件检测异常: {e}")
-        
-        # [v1.6.2] 第三层检测:文件头特征分析
+                
+        # [v1.6.2] 第二层检测:文件头特征分析
         try:
             with open(filepath, 'rb') as f:
-                header = f.read(1024)  # 读取前1024字节
+                header = f.read(2048)  # 读取前2048字节以获得更多信息
             
             # 检查常见的文件头特征
             if header.startswith(b'\x89PNG\r\n\x1a\n'):
@@ -1394,16 +1377,68 @@ class PluginMain(Star):
                 return ".gif"
             elif header.startswith(b'%PDF'):
                 return ".pdf"
-            elif header.startswith(b'PK'):
-                # ZIP文件,可能是Office文档
-                return ".zip"
             elif header.startswith(b'\x1f\x8b'):
                 return ".gz"
             elif header.startswith(b'Rar!'):
                 return ".rar"
+            elif header.startswith(b'7z\xbc\xaf\'\x27\x1c'):
+                return ".7z"
+            
+            # 特别处理ZIP文件(重点优化Office文档识别)
+            elif header.startswith(b'PK'):
+                # 对于ZIP文件，进一步检查内部结构来判断是否为Office文档
+                try:
+                    # 读取更多内容来分析ZIP内部结构
+                    with open(filepath, 'rb') as f:
+                        zip_content = f.read(8192)  # 读取更多内容
+                    
+                    # 检查Office Open XML文档的特征文件
+                    if b'[Content_Types].xml' in zip_content:
+                        # 进一步区分具体的Office文档类型
+                        if b'word/' in zip_content and b'document.xml' in zip_content:
+                            return ".docx"
+                        elif b'xl/' in zip_content and b'workbook.xml' in zip_content:
+                            return ".xlsx"
+                        elif b'ppt/' in zip_content and b'presentation.xml' in zip_content:
+                            return ".pptx"
+                        else:
+                            # 无法确定具体类型，但仍确认是Office文档
+                            return ".docx"  # 默认返回docx作为Office文档代表
+                    else:
+                        # 普通ZIP文件
+                        return ".zip"
+                except:
+                    # 如果分析失败，仍然返回ZIP
+                    return ".zip"
+            
+            # 添加更多格式支持
+            elif header.startswith(b'RIFF') and b'WEBP' in header[8:16]:
+                return ".webp"
+            elif header.startswith(b'BM'):
+                return ".bmp"
+            elif header.startswith(b'\x00\x00\x00\x18ftypmp4') or header.startswith(b'\x00\x00\x00\x20ftypmp4'):
+                return ".mp4"
+            elif header.startswith(b'ID3') or header.startswith(b'\xff\xfb'):
+                return ".mp3"
+            elif header.startswith(b'OggS'):
+                return ".ogg"
+            elif header.startswith(b'fLaC'):
+                return ".flac"
+            
         except Exception as e:
             if self.debug_mode:
-                logger.warning(f"[1.6.2] 文件头检测异常: {e}")
+                logger.warning(f"[1.6.2] 文件头检测异常: {e}")        
+                
+        # [v1.6.2] 第三层检测:文本文件检测
+        try:
+            is_text, encoding = self._is_text_file_safe(filepath)
+            if is_text:
+                if self.debug_mode:
+                    logger.info(f"[1.6.2] 检测到文本文件,编码: {encoding}")
+                return ".txt"
+        except Exception as e:
+            if self.debug_mode:
+                logger.warning(f"[1.6.2] 文本文件检测异常: {e}")
         
         # [v1.6.2] 第四层检测:二进制文件判断
         try:
